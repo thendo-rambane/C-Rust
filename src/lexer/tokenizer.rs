@@ -1,27 +1,13 @@
-use std::iter;
-use std::mem;
-use std::str;
-
-#[derive(PartialEq, Debug)]
-pub enum LiteralType {
-    Int(i32),
-}
-
-#[derive(PartialEq, Debug)]
-pub enum IdentifierType {
-    Var(Identifier),
-}
-
-#[derive(PartialEq, Debug)]
-pub struct Identifier {
-    value: LiteralType,
-    label: String,
-}
+use std::io::{self, Read};
 
 #[derive(PartialEq, Debug)]
 pub enum Token {
-    Literal(LiteralType),
-    Identifier(IdentifierType),
+    Eof,
+    Def,
+    Extern,
+    Identifier(String),
+    Number(f64),
+    Other(String),
 }
 
 #[derive(PartialEq, Debug)]
@@ -30,94 +16,76 @@ pub struct Tokenizer {
 }
 
 impl Tokenizer {
-    pub fn tokenize_int_literal(iter: &mut iter::Peekable<str::Chars>) -> Token {
-        let mut token_buffer = String::with_capacity(mem::size_of::<i32>());
-        while let Some(digit) = iter.next() {
-            if digit.is_digit(10) {
-                token_buffer.insert(token_buffer.len(), digit)
-            }
-        }
-
-        if let Some(after_digit) = iter.peek() {
-            if !after_digit.is_whitespace() {
-                todo!("Handle error case");
-            }
-        }
-        let token_value = token_buffer.parse::<i32>().unwrap();
-        Token::Literal(LiteralType::Int(token_value))
-    }
-    pub fn parse_alpha_num(iter: &mut iter::Peekable<str::Chars>) -> String {
-        let mut token_buffer = String::new();
-        while let Some(c) = iter.next() {
-            if c.is_ascii_alphanumeric() || c == '_' {
-                token_buffer = String::from(token_buffer + &c.to_string());
-            }
-        }
-        token_buffer
-    }
-
-    fn is_reserved(string: &str) -> bool {
-        match string {
-            "int" => true,
-            _ => false,
-        }
-    }
-
-    pub fn from_string(string: String) -> Tokenizer {
-        let mut iter = string.chars().into_iter().peekable();
-
-        let mut tokens: Vec<Token> = Vec::new();
-
-        while let Some(character) = iter.peek() {
-            if character.is_alphabetic() {
-                let token_buffer = Tokenizer::parse_alpha_num(&mut iter);
-                if Tokenizer::is_reserved(token_buffer.as_str()) {}
-                let token = match token_buffer.as_str() {
-                    "int" => {
-                        if let Some(c) = iter.peek() {
-                            if !c.is_whitespace() || *c != ';' {
-                                todo!("Handle error case");
-                            }
-                            iter.next();
-                        }
+    pub fn tokenize(string: String) -> Token {
+        let mut token = String::new();
+        let mut string_iter = string.chars().into_iter().peekable();
+        while let Some(c) = string_iter.peek() {
+            if c.is_whitespace() {
+                string_iter.next();
+            } else if c.is_alphabetic() {
+                while let Some(token_char) = string_iter.next() {
+                    if token_char.is_alphanumeric() {
+                        token = String::from(token + &token_char.to_string());
+                    } else {
+                        break;
                     }
-                    _ => {}
+                }
+                return match token.as_str() {
+                    "def" => Token::Def,
+                    "extern" => Token::Extern,
+                    _ => Token::Identifier(token.clone()),
                 };
-            } else if character.is_digit(10) {
-                let token = Tokenizer::tokenize_int_literal(&mut iter);
-                tokens.push(token);
-                break;
+            } else if c.is_numeric() {
+                while let Some(token_char) = string_iter.next() {
+                    if token.contains('.') && token_char == '.' {
+                        panic!("Multiple decimals")
+                    }
+                    if token_char.is_numeric() || token_char == '.' {
+                        token = String::from(token + &token_char.to_string());
+                    } else {
+                        break;
+                    }
+                    return Token::Number(
+                        token
+                            .parse::<f64>()
+                            .expect("Failed to parse numeric value."),
+                    );
+                }
+            } else if *c == '#' {
+                while let Some(comment_char) = string_iter.next() {
+                    if !"\r\n".contains(comment_char) {
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                return Token::Other(c.to_string());
             }
         }
-
-        Tokenizer { tokens }
+        return Token::Eof;
+    }
+    pub fn gettok() -> Token {
+        let mut string = String::new();
+        io::stdin()
+            .read_to_string(&mut string)
+            .expect("Failed to read from stdin");
+        Self::tokenize(string)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{Identifier, IdentifierType, LiteralType, Token, Tokenizer};
+    use super::{Token, Tokenizer};
 
     #[test]
-    fn test_tokenize_int_literal() {
-        let string_tokens = "1";
-        let tokens = Tokenizer::from_string(string_tokens.to_string());
-        let expected = Tokenizer {
-            tokens: vec![Token::Literal(LiteralType::Int(1))],
-        };
-        assert_eq!(tokens, expected)
+    fn eof() {
+        let expected = Token::Eof;
+        let actual = Tokenizer::tokenize("".to_string());
+        assert_eq!(expected, actual)
     }
 
     #[test]
-    fn test_tokenize_itentifier() {
-        let string_tokens = "int num;";
-        let tokens = Tokenizer::from_string(string_tokens.to_string());
-        let expected = Tokenizer {
-            tokens: vec![Token::Identifier(IdentifierType::Var(Identifier {
-                value: LiteralType::Int(0),
-                label: String::from("num"),
-            }))],
-        };
-        assert_eq!(tokens, expected)
+    fn fails() {
+        assert_eq!(1, 0)
     }
 }
