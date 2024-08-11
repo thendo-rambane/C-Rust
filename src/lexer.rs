@@ -4,7 +4,7 @@ use std::{
     iter,
 };
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Token {
     Eof,
     Def,
@@ -70,26 +70,20 @@ impl<'a> Tokenizer<'a> {
                     }
                 }
             } else {
-                while let Some(token_char) = self.source.peek() {
-                    if !(token_char.is_whitespace() || token_char.is_alphanumeric()) {
-                        token = String::from(token + &token_char.to_string());
-                        self.source.next();
-                    } else {
-                        break;
-                    }
-                }
-                return Token::Other(token);
+                let char = c.to_string();
+                self.source.next();
+                return Token::Other(char);
             }
         }
         return Token::Eof;
     }
-    pub fn gettok() -> Token {
+    pub fn gettok() -> Self {
         let mut string = String::new();
         io::stdin()
             .read_to_string(&mut string)
             .expect("Failed to read from stdin");
-        let mut tokenizer = Self::new(&Box::new(string.clone()));
-        tokenizer.tokenize()
+        let program = Box::leak(string.into_boxed_str());
+        Self::new(program)
     }
 }
 
@@ -139,7 +133,10 @@ mod test {
     #[test]
     fn other() {
         let mut tokenizer = Tokenizer::new("{}");
-        let expected = Token::Other(String::from("{}"));
+        let expected = Token::Other(String::from("{"));
+        let actual = tokenizer.tokenize();
+        assert_eq!(actual, expected);
+        let expected = Token::Other(String::from("}"));
         let actual = tokenizer.tokenize();
         assert_eq!(actual, expected)
     }
@@ -147,7 +144,10 @@ mod test {
     #[test]
     fn multi_tokens() {
         let mut tokenizer = Tokenizer::new("{} test");
-        let expected = Token::Other(String::from("{}"));
+        let expected = Token::Other(String::from("{"));
+        let actual = tokenizer.tokenize();
+        assert_eq!(actual, expected);
+        let expected = Token::Other(String::from("}"));
         let actual = tokenizer.tokenize();
         assert_eq!(actual, expected);
         let expected = Token::Identifier(String::from("test"));
