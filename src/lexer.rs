@@ -14,7 +14,7 @@ pub enum Token {
     Other(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Tokenizer<'a> {
     source: Box<iter::Peekable<str::Chars<'a>>>,
 }
