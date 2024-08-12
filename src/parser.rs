@@ -1,6 +1,6 @@
 use std::collections;
 
-use crate::lexer::{self, Token};
+use crate::lexer::{self};
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 enum Operator {
@@ -8,6 +8,12 @@ enum Operator {
     Minus,
     Multiply,
     Divide,
+}
+
+#[derive(Debug, PartialEq)]
+struct Prototype {
+    name: String,
+    args: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -26,12 +32,6 @@ enum Expression {
     Null,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-struct Prototype {
-    name: String,
-    args: Vec<String>,
-}
-
 impl Prototype {
     pub fn get_name(self) -> String {
         self.name
@@ -39,9 +39,9 @@ impl Prototype {
 }
 
 #[derive(Debug, PartialEq)]
-struct Funcion {
-    proto: Box<Prototype>,
-    body: Box<Expression>,
+struct Function {
+    prototype: Prototype,
+    body: Expression,
 }
 
 #[derive(Debug, Clone)]
@@ -59,27 +59,28 @@ impl Parser<'_> {
             tokenizer,
         }
     }
-    pub fn get_next_token(&mut self) {
+    pub fn get_next_token(&mut self) -> lexer::Token {
         self.current_token = self.tokenizer.tokenize();
+        return self.current_token.clone();
     }
 
-    pub fn parse_number_expression(&mut self) -> Result<Expression, String> {
+    pub fn parse_number_expression(&mut self) -> Option<Expression> {
         match self.current_token {
             lexer::Token::Number(value) => {
                 self.get_next_token();
-                Ok(Expression::NumberExpression(value))
+                Some(Expression::NumberExpression(value))
             }
-            _ => Err("Expected a 'Number'".into()),
+            _ => None,
         }
     }
 
-    pub fn operator(token: String) -> Result<Operator, String> {
+    pub fn operator(token: String) -> Option<Operator> {
         match token.as_str() {
-            "+" => Ok(Operator::Plus),
-            "-" => Ok(Operator::Minus),
-            "/" => Ok(Operator::Divide),
-            "*" => Ok(Operator::Multiply),
-            _ => Err("Not operator".into()),
+            "+" => Some(Operator::Plus),
+            "-" => Some(Operator::Minus),
+            "/" => Some(Operator::Divide),
+            "*" => Some(Operator::Multiply),
+            _ => None,
         }
     }
 
@@ -103,11 +104,11 @@ impl Parser<'_> {
         &mut self,
         expression_precedence: u32,
         lhs: Expression,
-    ) -> Result<Expression, String> {
+    ) -> Option<Expression> {
         loop {
             let token_precedence = self.get_token_precedence();
             if token_precedence < expression_precedence {
-                return Ok(lhs);
+                return Some(lhs);
             }
             let binary_operation = Self::operator(match self.current_token.clone() {
                 lexer::Token::Other(token) => token,
@@ -117,18 +118,18 @@ impl Parser<'_> {
             self.get_next_token();
 
             let mut rhs = match self.parse_primary() {
-                Ok(primary_expression) => primary_expression,
-                Err(error) => return Err(format!("Binary Operation Error From {}", error)),
+                Some(primary_expression) => primary_expression,
+                _ => return None,
             };
 
             let next_token_precedence = self.get_token_precedence();
             if token_precedence < next_token_precedence {
                 rhs = match self.parse_binary_op_rhs(token_precedence + 1, rhs) {
-                    Ok(primary_expression) => primary_expression,
-                    Err(error) => return Err(format!("Binary Operation Error From {}", error)),
+                    Some(primary_expression) => primary_expression,
+                    _ => return None,
                 }
             }
-            return Ok(Expression::BinaryExpression {
+            return Some(Expression::BinaryExpression {
                 operator: binary_operation,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
@@ -136,14 +137,14 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_identifier_expression(&mut self) -> Result<Expression, String> {
+    pub fn parse_identifier_expression(&mut self) -> Option<Expression> {
         match self.current_token.clone() {
             lexer::Token::Identifier(identifier) => {
                 self.get_next_token();
                 if let lexer::Token::Other(open_paren) = &self.current_token {
                     if open_paren != "(" {
                         let string = &identifier.clone();
-                        return Ok(Expression::VariableExpression(string.to_string()));
+                        return Some(Expression::VariableExpression(string.to_string()));
                     }
                     self.get_next_token();
 
@@ -151,36 +152,89 @@ impl Parser<'_> {
                     loop {
                         let arg = self.parse_expression();
                         match arg {
-                            Ok(parsed_arg) => args.push(Box::new(parsed_arg)),
-                            Err(arg_error) => {
-                                return Err(format!("Failed to parse args: {}", arg_error))
-                            }
+                            Some(parsed_arg) => args.push(Box::new(parsed_arg)),
+                            _ => return None,
                         }
                         if let lexer::Token::Other(token) = &self.current_token {
                             if token == ")" {
                                 break;
                             }
                             if token != "," {
-                                return Err("Expected ')' or ',' in argument list".into());
+                                return None;
                             }
                         }
                         self.get_next_token();
                     }
                     self.get_next_token();
-                    Ok(Expression::CallExpression {
+                    Some(Expression::CallExpression {
                         callee: identifier.to_owned(),
                         args,
                     })
                 } else {
-                    Err("Expected 'Other' token".into())
+                    None
                 }
             }
-            _ => Err("Not identifier".into()),
+            _ => None,
         }
     }
 
-    fn parse_primary(&mut self) -> Result<Expression, String> {
-        let error = Err("unkown token expected expression".to_string());
+    fn parse_prototype(&mut self) -> Option<Prototype> {
+        match self.current_token.clone() {
+            lexer::Token::Identifier(function_name) => {
+                self.get_next_token();
+                if let lexer::Token::Other(token) = self.current_token.clone() {
+                    if token != "(" {
+                        return None;
+                    };
+                    let mut argument_names: Vec<String> = Vec::new();
+                    while let lexer::Token::Identifier(arg_identifier) = self.get_next_token() {
+                        argument_names.push(arg_identifier);
+                    }
+                    if let lexer::Token::Other(end_token) = self.current_token.clone() {
+                        if end_token != ")" {
+                            return None;
+                        }
+                        self.get_next_token();
+                    }
+                    return Some(Prototype {
+                        name: function_name,
+                        args: argument_names,
+                    });
+                }
+                return None;
+            }
+            _ => return None,
+        }
+    }
+
+    fn parse_definition(&mut self) -> Option<Function> {
+        self.get_next_token();
+        if let Some(prototype) = self.parse_prototype() {
+            if let Some(body) = self.parse_expression() {
+                return Some(Function { prototype, body });
+            }
+        }
+        None
+    }
+
+    fn parse_top_level_expression(&mut self) -> Option<Function> {
+        if let Some(body) = self.parse_expression() {
+            let prototype = Prototype {
+                name: "__anon_expr".into(),
+                args: vec![],
+            };
+            Some(Function { prototype, body })
+        } else {
+            None
+        }
+    }
+
+    fn parse_extern(&mut self) -> Option<Prototype> {
+        self.get_next_token();
+        return self.parse_prototype();
+    }
+
+    fn parse_primary(&mut self) -> Option<Expression> {
         match self.current_token.clone() {
             lexer::Token::Identifier(_) => self.parse_identifier_expression(),
             lexer::Token::Number(_) => self.parse_number_expression(),
@@ -188,44 +242,40 @@ impl Parser<'_> {
                 if token == "(" {
                     self.parse_parenthesis_expression()
                 } else {
-                    error
+                    None
                 }
             }
-            _ => error,
+            _ => None,
         }
     }
 
-    fn parse_bin_op(&mut self) -> Result<Expression, String> {
-        unimplemented!("TODO:")
-    }
-
-    pub fn parse_expression(&mut self) -> Result<Expression, String> {
+    pub fn parse_expression(&mut self) -> Option<Expression> {
         let lhs = match self.parse_primary() {
-            Ok(expression) => expression,
-            Err(error) => return Err(format!("Failed to parse expression: {}", error)),
+            Some(expression) => expression,
+            _ => return None,
         };
         return self.parse_binary_op_rhs(1, lhs);
     }
 
-    pub fn parse_parenthesis_expression(&mut self) -> Result<Expression, String> {
+    pub fn parse_parenthesis_expression(&mut self) -> Option<Expression> {
         match &self.current_token {
             lexer::Token::Other(_) => {
                 self.get_next_token();
                 let value = self.parse_expression();
                 match value {
-                    Ok(expression) => {
+                    Some(expression) => {
                         if let lexer::Token::Other(close_paren) = &self.current_token {
                             if close_paren != ")" {
-                                return Err("Expeced ')'".into());
+                                return None;
                             }
                             self.get_next_token();
                         }
-                        Ok(expression)
+                        Some(expression)
                     }
-                    Err(error) => return Err(error),
+                    _ => return None,
                 }
             }
-            _ => Err("Not paren".into()),
+            _ => None,
         }
     }
 }
